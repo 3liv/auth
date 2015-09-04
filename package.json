@@ -1,0 +1,31 @@
+{
+  "name": "rijs.auth",
+  "version": "0.0.0",
+  "main": "dist",
+  "browser": "./dist/client.js",
+  "author": "Pedram Emrouznejad (https://github.com/pemrouz)",
+  "scripts": {
+    "ignore": "find ./dist -type f -exec sed -i \"s/var _interopRequire/\\/* istanbul ignore next *\\/\\nvar _interopRequire/g\" {} ;",
+    "babel": "babel src -d dist",
+    "bundle": "cp ./node_modules/utilise/identity.js dist/client.js",
+    "minify": "uglifyjs dist/client.js -m -c drop_console,dead_code -d debug=false -o dist/client.min.js",
+    "build": "npm run babel && npm run ignore && npm run bundle && npm run minify",
+    "test": "istanbul test ./node_modules/mocha/bin/_mocha --report html -- -R spec",
+    "coverage": "istanbul cover ./node_modules/mocha/bin/_mocha --report lcovonly -- -R spec && rm -rf ./coverage"
+  },
+  "license": "pemrouz.mit-license.org",
+  "devDependencies": {
+    "babel": "^4.6.3",
+    "browserify": "^9.0.3",
+    "chai": "^2.3.0",
+    "coveralls": "^2.11.2",
+    "istanbul": "^0.3.13",
+    "mocha": "^2.2.4",
+    "mocha-lcov-reporter": "0.0.2",
+    "uglify-js": "^2.4.16"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.3.5",
+    "utilise": "*"
+  }
+}
