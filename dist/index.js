@@ -33,7 +33,9 @@ function auth() {
   // register a resource for current user
   ripple("user", { whos: whos, register: register, logout: logout }, { from: login(match, quick), to: limit(mask), cache: null });
 
-  ripple("auth-check", check);
+  ripple("auth-check", opts.check || check);
+
+  ripple("login-message", message);
 }
 
 function login(match, quick) {
@@ -42,21 +44,23 @@ function login(match, quick) {
 
     var end = resolve(this.sessionID, attempt || {});
 
-    if (!attempt.username || !attempt.password) return end("missing info");
+    if (!attempt.email || !attempt.password) return end("missing info");
 
     // find user record
-    var row = ripple("users").filter(match(attempt) || by("username", attempt.username)).pop();
+    var row = ripple("users").filter(by("email", attempt.email)).pop();
 
-    // quick register if no matching username
-    if (!row && attempt.password) return quick ? register(this, attempt) : end("incorrect username");
+    if (row && match && !match(row)) return end("Your account is not approved");
+
+    // quick register if no matching email
+    if (!row && attempt.password) return quick ? register(this, attempt) : end("Incorrect username/password");
 
     // calc hash
-    var saltHash = crypto.createHash("md5").update(row.salt).digest("hex"),
-        apwdHash = crypto.createHash("md5").update(attempt.password).digest("hex"),
-        atmptHash = crypto.createHash("md5").update(saltHash + apwdHash).digest("hex");
+    var saltHash = hash(row.salt),
+        apwdHash = hash(attempt.password),
+        atmptHash = hash(saltHash + apwdHash);
 
     // incorrect password
-    if (atmptHash !== row.hash) return end("incorrect password");
+    if (atmptHash !== row.hash) return end("Incorrect username/password");
 
     // correct password, set session data
     return end({ id: row.id });
@@ -66,14 +70,14 @@ function login(match, quick) {
 function resolve(sid) {
   var _ref = arguments[1] === undefined ? {} : arguments[1];
 
-  var _ref$username = _ref.username;
-  var username = _ref$username === undefined ? "" : _ref$username;
+  var _ref$email = _ref.email;
+  var email = _ref$email === undefined ? "" : _ref$email;
 
   return function (detail) {
     var say = is.str(detail) ? err : log;
     is.str(detail) && (detail = { invalid: true, msg: detail });
     set(sid, "user", detail);
-    say(detail.msg || "logged in", username, sid.grey);
+    say(detail.msg || "logged in", email, sid.grey);
     return false;
   };
 }
@@ -99,7 +103,7 @@ function register(_ref, attempt, body) {
   var _ref$sessionID = _ref.sessionID;
   var sessionID = _ref$sessionID === undefined ? "" : _ref$sessionID;
 
-  log("registering", attempt.username, sessionID.grey);
+  log("registering", attempt.email, sessionID.grey);
 
   var p = promise(),
       pass = attempt.password,
@@ -108,7 +112,7 @@ function register(_ref, attempt, body) {
       apwdHash = crypto.createHash("md5").update(pass).digest("hex"),
       fullHash = crypto.createHash("md5").update(saltHash + apwdHash).digest("hex"),
       user = extend({
-    username: attempt.username,
+    email: attempt.email,
     salt: salt,
     hash: fullHash,
     sessionID: sessionID
@@ -133,16 +137,20 @@ function refresh(d, change) {
   ripple.sync(change.key)();
 }
 
+function message() {
+  this.innerHTML = str(ripple("user").msg);
+}
+
 function check(req, res, next) {
   if (client && !window.ripple) {
     return;
   }var me = client ? ripple("user") : whos(req),
       from = client ? location.pathname : req.url,
       open = is["in"](["/invalid", "/login", "/not-approved"])(from),
-      to = me.invalid ? "/invalid" : !me.username ? "/login" : !me.approved ? "/not-approved" : open ? "/dashboard" : from;
+      to = me.invalid ? "/invalid" : !me.email ? "/login" : !me.approved ? "/not-approved" : open ? "/dashboard" : from;
 
   if (!from) {
-    return log("auth-check", me.username, from, to);
+    return log("auth-check", me.email, from, to);
   }from != to && log("auth-check redirecting", from, to);
 
   return client && from !== to ? request(to)() : !client && from !== to ? res.redirect(to) : !client ? next() : undefined;
@@ -165,6 +173,10 @@ function limit(fields) {
 
     return val;
   };
+}
+
+function hash(thing) {
+  return crypto.createHash("md5").update(thing).digest("hex");
 }
 
 var debounce = _interopRequire(require("utilise/debounce"));

@@ -26,7 +26,9 @@ export default function auth(opts = {}){
   // register a resource for current user
   ripple('user', { whos, register, logout }, { from: login(match, quick), to: limit(mask), cache: null })
 
-  ripple('auth-check', check)
+  ripple('auth-check', opts.check || check)
+
+  ripple('login-message', message)
 }
 
 function login(match, quick){
@@ -35,44 +37,37 @@ function login(match, quick){
 
     var end = resolve(this.sessionID, attempt || {})
 
-    if (!attempt.username || !attempt.password) return end('missing info')
+    if (!attempt.email || !attempt.password) return end('missing info')
 
     // find user record
     var row = ripple('users')
-      .filter(match(attempt) || by('username', attempt.username))
+      .filter(by('email', attempt.email))
       .pop()
 
-    // quick register if no matching username
-    if (!row && attempt.password) return quick ? register(this, attempt) : end('incorrect username')
+    if (row && match && !match(row)) return end('Your account is not approved')
+
+    // quick register if no matching email
+    if (!row && attempt.password) return quick ? register(this, attempt) : end('Incorrect username/password')
 
     // calc hash
-    var saltHash = crypto
-          .createHash('md5')
-          .update(row.salt)
-          .digest('hex')
-      , apwdHash = crypto
-          .createHash('md5')
-          .update(attempt.password)
-          .digest('hex')
-      , atmptHash = crypto
-          .createHash('md5')
-          .update(saltHash + apwdHash)
-          .digest('hex')
+    var saltHash = hash(row.salt)
+      , apwdHash = hash(attempt.password)
+      , atmptHash = hash(saltHash + apwdHash)
 
     // incorrect password
-    if (atmptHash !== row.hash) return end('incorrect password')
+    if (atmptHash !== row.hash) return end('Incorrect username/password')
 
     // correct password, set session data
     return end({ id: row.id })
   }
 }
 
-function resolve(sid, { username = '' } = {}){
+function resolve(sid, { email = '' } = {}){
   return function(detail){
     var say = is.str(detail) ? err : log
     is.str(detail) && (detail = { invalid: true, msg: detail })
     set(sid, 'user', detail)
-    say(detail.msg || 'logged in', username, sid.grey)
+    say(detail.msg || 'logged in', email, sid.grey)
     return false
   }
 }
@@ -91,16 +86,16 @@ function newuser(users, { value = {}} ){
 }
 
 function register({ sessionID = '' }, attempt, body) {
-  log('registering', attempt.username, sessionID.grey)
+  log('registering', attempt.email, sessionID.grey)
   
   var p = promise()
     , pass = attempt.password
     , salt = Math.random().toString(36).substr(2, 5)
-    , saltHash = crypto.createHash('md5').update(salt).digest('hex')
-    , apwdHash = crypto.createHash('md5').update(pass).digest('hex')
-    , fullHash = crypto.createHash('md5').update(saltHash + apwdHash).digest('hex')
+    , saltHash = hash(salt)
+    , apwdHash = hash(pass)
+    , fullHash = hash(saltHash + apwdHash)
     , user = extend({ 
-        username: attempt.username
+        email: attempt.email
       , salt: salt
       , hash: fullHash
       , sessionID: sessionID
@@ -125,6 +120,10 @@ function refresh(d, change) {
   ripple.sync(change.key)()
 }
 
+function message(){
+  this.innerHTML = str(ripple('user').msg)
+}
+
 function check(req, res, next){
   if (client && !window.ripple) return;
 
@@ -132,12 +131,12 @@ function check(req, res, next){
     , from = client ? location.pathname : req.url
     , open = is.in(['/invalid', '/login', '/not-approved'])(from)
     , to =  me.invalid  ? '/invalid'
-         : !me.username ? '/login'
+         : !me.email    ? '/login'
          : !me.approved ? '/not-approved'
          :  open        ? '/dashboard'
                         : from
 
-  if (!from) return log('auth-check', me.username, from, to);
+  if (!from) return log('auth-check', me.email, from, to);
 
   from != to && log('auth-check redirecting', from, to)
 
@@ -172,6 +171,13 @@ function limit(fields){
     
     return val
   }
+}
+
+function hash(thing){
+  return crypto
+    .createHash('md5')
+    .update(thing)
+    .digest('hex')
 }
 
 import debounce from 'utilise/debounce'
