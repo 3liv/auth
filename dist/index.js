@@ -108,9 +108,9 @@ function register(_ref, attempt, body) {
   var p = promise(),
       pass = attempt.password,
       salt = Math.random().toString(36).substr(2, 5),
-      saltHash = crypto.createHash("md5").update(salt).digest("hex"),
-      apwdHash = crypto.createHash("md5").update(pass).digest("hex"),
-      fullHash = crypto.createHash("md5").update(saltHash + apwdHash).digest("hex"),
+      saltHash = hash(salt),
+      apwdHash = hash(pass),
+      fullHash = hash(saltHash + apwdHash),
       user = extend({
     email: attempt.email,
     salt: salt,
