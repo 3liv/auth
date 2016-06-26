@@ -3,46 +3,58 @@
 // -------------------------------------------
 export default function auth({ session, match, mask, quick }){
   log('creating')
-  
-  // whenever there is a change to a session, refresh their resources
-  session.store.sessions = ripple('sessions', session.store.sessions, { from: falsy, to: falsy })
-    .on('change.refresh', debounce(200)(refresh))
 
   // this function is used to restore a session from a reconnecting client
   def(session.store.sessions, 'create', function create(sid){
     var socket = values(ripple.io.of('/').sockets).filter(by('sessionID', sid)).pop()
     session.store.sessions[sid] = str(session.store.createSession(socket, session))
   })
+  
+  const loaded = {
+          // whenever there is a change to a session, refresh their resources
+          sessions(ripple, { body }) { body.on('change.refresh', debounce(200)(refresh)) }
+          // load users and login on register
+        , users(ripple) { ripple.connections.mysql.load('users')
+            .then(rows => 
+              ripple('users', rows
+                .reduce(to.obj, {}))
+              .on('change', newUser))
+          }
+        }
 
-  // load users and login on register
-  ripple('users', [], { from: falsy, to: falsy, mysql: { to: filterInvalid } })
-    .on('change', newuser)
-
-  // register a resource for current user
-  ripple('user', {}, { 
-    from: login(match, quick)
-  , to: limit(mask)
-  , cache: 'no-store' 
-  , helpers: { whos, register, logout }
-  })
-
-  ripple('login-message', message)
+  return [
+    { name: 'sessions'
+    , body: session.store.sessions
+    , headers: { loaded: loaded.sessions, from: falsy, to: falsy }
+    }
+  , { name: 'users'
+    , body: {}
+    , headers: { loaded: loaded.users, from: register, to: d => ({}) }
+    }
+  , { name: 'user'
+    , body: {}
+    , headers: { 
+        from: login(match, quick)
+      , to: limit(mask)
+      , cache: 'no-store' 
+      , helpers: { whos/*, register, logout*/ }
+      } 
+    }
+  ]
 }
 
-const filterInvalid = (res, change) => !change.value.invalid
-
 const login = (match, quick) => function({ body }, { value }){ 
-  const attempt = (value || body || {}).attempt
+  const { attempt } = value || body || {}
   
-  if (!attempt) return err('no attempt?') 
+  if (!attempt) return err('no attempt?'), false
   log('login attempted', str(attempt.email).grey)
   const end = resolve(this.sessionID, attempt || {})
 
   if (!attempt.email || !attempt.password) 
-    return end('missing info')
+    return end('Missing username/password')
 
   // find user record
-  const row = ripple('users')
+  const row = values(ripple('users'))
     .filter(by('email', attempt.email))
     .pop()
 
@@ -72,7 +84,7 @@ const resolve = (sid, { email = '' } = {}) => detail => {
 
   set(sid, 'user', detail)
 
-  ;(is.str(detail) ? err : log)(detail.msg || 'logged in', email, sid.grey)
+  ;(detail.invalid ? err : log)(detail.msg || 'logged in', email, sid.grey)
   return false
 }
 
@@ -86,65 +98,70 @@ const set = (sid, name, details) => {
   log('sessions updated', str(details).grey)
 }
 
-const newuser = ({ value }) => {
+const newUser = ({ value }) => {
   if (!value.id || !value.sessionID) return
+  console.log("new user")
   resolve(value.sessionID, value)({ id: value.id })
 }
 
-// TODO WTF - fix sign..
-function register({ sessionID = '' }, attempt, body) {
-  log('registering', attempt.email, sessionID.grey)
+// const register = ({ sessionID = '' }, { email, password }, body) => {
+function register({}, { key, type, value }, respond) {
+  if (type !== 'register') return respond(err(400, 'can only register users')), false
   
-  var p = promise()
-    , pass = attempt.password
-    , salt = Math.random().toString(36).substr(2, 5)
-    , saltHash = hash(salt)
-    , apwdHash = hash(pass)
-    , fullHash = hash(saltHash + apwdHash)
-    , user = extend({ 
-        email: attempt.email
-      , salt: salt
-      , hash: fullHash
-      , sessionID: sessionID
-      })(body)
+  const { sessionID } = this
+      , { email, password } = value
+      , users = ripple('users')
+      , my = ripple.connections.mysql
+      , salt = Math.random().toString(36).substr(2, 5)
+      , saltHash = hash(salt)
+      , apwdHash = hash(password)
+      , fullHash = hash(saltHash + apwdHash)
+      , user = extend({ 
+          email
+        , salt
+        , hash: fullHash
+        , sessionID
+        })(value)
 
-  ripple('users')
-    .once('change', wait(r => user.id)(p.resolve))
-    .push(user)
+  if (values(users).some(by('email', email))) 
+    return respond(err(409, 'user registered', email)), false
 
-  return p
+  log('registering', email, sessionID.grey)
+
+  my.add('users', user)
+    .then(id => respond(log(200, 'added user'.green, !!update(id, (user.id = id, user))(users))))
+
+  return false
 }
 
-const logout = (req, res) => {
-  log('logout', ripple('sessions'))
-  delete req.session.user
-  ripple('sessions')[req.sessionID] = str(req.session)
-  res.status(204).end()
-  ripple.stream(req.sessionID)() 
+// const logout = (req, res) => {
+//   log('logout', ripple('sessions'))
+//   delete req.session.user
+//   ripple('sessions')[req.sessionID] = str(req.session)
+//   res.status(204).end()
+//   ripple.stream(req.sessionID)() 
+// }
+
+// const refresh = ({ key }) => ripple.stream(key)()
+const refresh = function({ key }){
+  console.log("refresh", ripple('sessions'))
+  ripple.stream(key)()
 }
 
-const refresh = ({ key }) => ripple.stream(key)()
+const whos = (socket) => { 
+  const sessionID = key('sessionID')(socket)
+      , user = [ripple('sessions')[sessionID]]
+          .filter(Boolean)
+          .map(parse)
+          .map(key('user'))
+          .pop() || {}
 
-function message(){
-  this.innerHTML = owner.str(ripple('user').msg)
-}
-
-function whos(socket){ 
-  var sessionID = key('sessionID')(this) || key('sessionID')(socket)
-    , user = [ripple('sessions')[sessionID]]
-        .filter(Boolean)
-        .map(parse)
-        .map(key('user'))
-        .pop() || {}
-  
-  return ripple('users')
-    .filter(by('id', user.id))
-    .pop() || user
+  return ripple('users')[user.id] || user
 }
 
 const limit = fields => function(){
   const user = whos(this)
-      , val = is.fn(fields) ? fields(user) : key(fields)(user)
+      , val  = key(fields)(user)
 
   if (user.invalid) val.invalid = user.invalid
   if (user.msg) val.msg = user.msg

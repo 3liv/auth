@@ -52,6 +52,8 @@ var _crypto2 = _interopRequireDefault(_crypto);
 /* istanbul ignore next */
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
+function _objectDestructuringEmpty(obj) { if (obj == null) throw new TypeError("Cannot destructure undefined"); }
+
 // -------------------------------------------
 // User Management Middleware
 // -------------------------------------------
@@ -63,48 +65,64 @@ function auth(_ref) {
 
   log('creating');
 
-  // whenever there is a change to a session, refresh their resources
-  session.store.sessions = ripple('sessions', session.store.sessions, { from: _falsy2.default, to: _falsy2.default }).on('change.refresh', (0, _debounce2.default)(200)(refresh));
-
   // this function is used to restore a session from a reconnecting client
   (0, _def2.default)(session.store.sessions, 'create', function create(sid) {
     var socket = values(ripple.io.of('/').sockets).filter((0, _by2.default)('sessionID', sid)).pop();
     session.store.sessions[sid] = (0, _str2.default)(session.store.createSession(socket, session));
   });
 
-  // load users and login on register
-  ripple('users', [], { from: _falsy2.default, to: _falsy2.default, mysql: { to: filterInvalid } }).on('change', newuser);
+  var loaded = {
+    // whenever there is a change to a session, refresh their resources
 
-  // register a resource for current user
-  ripple('user', {}, {
-    from: login(match, quick),
-    to: limit(mask),
-    cache: 'no-store',
-    helpers: { whos: whos, register: register, logout: logout }
-  });
+    sessions: function sessions(ripple, _ref2) {
+      var body = _ref2.body;
+      body.on('change.refresh', (0, _debounce2.default)(200)(refresh));
+    }
+    // load users and login on register
+    ,
+    users: function users(ripple) {
+      ripple.connections.mysql.load('users').then(function (rows) {
+        return ripple('users', rows.reduce(to.obj, {})).on('change', newUser);
+      });
+    }
+  };
 
-  ripple('login-message', message);
+  return [{ name: 'sessions',
+    body: session.store.sessions,
+    headers: { loaded: loaded.sessions, from: _falsy2.default, to: _falsy2.default }
+  }, { name: 'users',
+    body: {},
+    headers: { loaded: loaded.users, from: register, to: function to(d) {
+        return {};
+      } }
+  }, { name: 'user',
+    body: {},
+    headers: {
+      from: login(match, quick),
+      to: limit(mask),
+      cache: 'no-store',
+      helpers: { whos: whos /*, register, logout*/ }
+    }
+  }];
 }
 
-var filterInvalid = function filterInvalid(res, change) {
-  return !change.value.invalid;
-};
-
 var login = function login(match, quick) {
-  return function (_ref2, _ref3) {
-    var body = _ref2.body;
-    var value = _ref3.value;
+  return function (_ref3, _ref4) {
+    var body = _ref3.body;
+    var value = _ref4.value;
 
-    var attempt = (value || body || {}).attempt;
+    var _ref5 = value || body || {};
 
-    if (!attempt) return err('no attempt?');
+    var attempt = _ref5.attempt;
+
+    if (!attempt) return err('no attempt?'), false;
     log('login attempted', (0, _str2.default)(attempt.email).grey);
     var end = resolve(this.sessionID, attempt || {});
 
-    if (!attempt.email || !attempt.password) return end('missing info');
+    if (!attempt.email || !attempt.password) return end('Missing username/password');
 
     // find user record
-    var row = ripple('users').filter((0, _by2.default)('email', attempt.email)).pop();
+    var row = values(ripple('users')).filter((0, _by2.default)('email', attempt.email)).pop();
 
     if (row && match && !match(row)) return end('Your account is not approved');
 
@@ -125,14 +143,14 @@ var login = function login(match, quick) {
 };
 
 var resolve = function resolve(sid) {
-  var _ref4 = arguments.length <= 1 || arguments[1] === undefined ? {} : arguments[1];
+  var _ref6 = arguments.length <= 1 || arguments[1] === undefined ? {} : arguments[1];
 
-  var _ref4$email = _ref4.email;
-  var email = _ref4$email === undefined ? '' : _ref4$email;
+  var _ref6$email = _ref6.email;
+  var email = _ref6$email === undefined ? '' : _ref6$email;
   return function (detail) {
     if (_is2.default.str(detail)) detail = { invalid: true, msg: detail };
 
-    set(sid, 'user', detail);(_is2.default.str(detail) ? err : log)(detail.msg || 'logged in', email, sid.grey);
+    set(sid, 'user', detail);(detail.invalid ? err : log)(detail.msg || 'logged in', email, sid.grey);
     return false;
   };
 };
@@ -147,68 +165,78 @@ var set = function set(sid, name, details) {
   log('sessions updated', (0, _str2.default)(details).grey);
 };
 
-var newuser = function newuser(_ref5) {
-  var value = _ref5.value;
+var newUser = function newUser(_ref7) {
+  var value = _ref7.value;
 
   if (!value.id || !value.sessionID) return;
+  console.log("new user");
   resolve(value.sessionID, value)({ id: value.id });
 };
 
-// TODO WTF - fix sign..
-function register(_ref6, attempt, body) {
-  var _ref6$sessionID = _ref6.sessionID;
-  var sessionID = _ref6$sessionID === undefined ? '' : _ref6$sessionID;
+// const register = ({ sessionID = '' }, { email, password }, body) => {
+function register(_ref8, _ref9, respond) {
+  var key = _ref9.key;
+  var type = _ref9.type;
+  var value = _ref9.value;
 
-  log('registering', attempt.email, sessionID.grey);
+  _objectDestructuringEmpty(_ref8);
 
-  var p = promise(),
-      pass = attempt.password,
-      salt = Math.random().toString(36).substr(2, 5),
-      saltHash = hash(salt),
-      apwdHash = hash(pass),
-      fullHash = hash(saltHash + apwdHash),
-      user = extend({
-    email: attempt.email,
+  if (type !== 'register') return respond(err(400, 'can only register users')), false;
+
+  var sessionID = this.sessionID;
+  var email = value.email;
+  var password = value.password;
+  var users = ripple('users');
+  var my = ripple.connections.mysql;
+  var salt = Math.random().toString(36).substr(2, 5);
+  var saltHash = hash(salt);
+  var apwdHash = hash(password);
+  var fullHash = hash(saltHash + apwdHash);
+  var user = extend({
+    email: email,
     salt: salt,
     hash: fullHash,
     sessionID: sessionID
-  })(body);
+  })(value);
 
-  ripple('users').once('change', wait(function (r) {
-    return user.id;
-  })(p.resolve)).push(user);
+  if (values(users).some((0, _by2.default)('email', email))) return console.log(!respond(err(409, 'user registered', email))), false;
 
-  return p;
+  log('registering', email, sessionID.grey);
+
+  my.add('users', user).then(function (id) {
+    return respond(log(200, 'added user'.green, !!(0, _update2.default)(id, (user.id = id, user))(users)));
+  });
+
+  return false;
 }
 
-var logout = function logout(req, res) {
-  log('logout', ripple('sessions'));
-  delete req.session.user;
-  ripple('sessions')[req.sessionID] = (0, _str2.default)(req.session);
-  res.status(204).end();
-  ripple.stream(req.sessionID)();
+// const logout = (req, res) => {
+//   log('logout', ripple('sessions'))
+//   delete req.session.user
+//   ripple('sessions')[req.sessionID] = str(req.session)
+//   res.status(204).end()
+//   ripple.stream(req.sessionID)()
+// }
+
+// const refresh = ({ key }) => ripple.stream(key)()
+var refresh = function refresh(_ref10) {
+  var key = _ref10.key;
+
+  console.log("refresh", ripple('sessions'));
+  ripple.stream(key)();
 };
 
-var refresh = function refresh(_ref7) {
-  var key = _ref7.key;
-  return ripple.stream(key)();
-};
-
-function message() {
-  this.innerHTML = owner.str(ripple('user').msg);
-}
-
-function whos(socket) {
-  var sessionID = (0, _key2.default)('sessionID')(this) || (0, _key2.default)('sessionID')(socket),
+var whos = function whos(socket) {
+  var sessionID = (0, _key2.default)('sessionID')(socket),
       user = [ripple('sessions')[sessionID]].filter(Boolean).map(_parse2.default).map((0, _key2.default)('user')).pop() || {};
 
-  return ripple('users').filter((0, _by2.default)('id', user.id)).pop() || user;
-}
+  return ripple('users')[user.id] || user;
+};
 
 var limit = function limit(fields) {
   return function () {
     var user = whos(this),
-        val = _is2.default.fn(fields) ? fields(user) : (0, _key2.default)(fields)(user);
+        val = (0, _key2.default)(fields)(user);
 
     if (user.invalid) val.invalid = user.invalid;
     if (user.msg) val.msg = user.msg;
