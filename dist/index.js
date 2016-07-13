@@ -25,6 +25,10 @@ var _parse = require('utilise/parse');
 
 var _parse2 = _interopRequireDefault(_parse);
 
+var _noop = require('utilise/noop');
+
+var _noop2 = _interopRequireDefault(_noop);
+
 var _key = require('utilise/key');
 
 var _key2 = _interopRequireDefault(_key);
@@ -45,9 +49,17 @@ var _by = require('utilise/by');
 
 var _by2 = _interopRequireDefault(_by);
 
+var _to = require('utilise/to');
+
+var _to2 = _interopRequireDefault(_to);
+
 var _crypto = require('crypto');
 
 var _crypto2 = _interopRequireDefault(_crypto);
+
+var _moment = require('moment');
+
+var _moment2 = _interopRequireDefault(_moment);
 
 /* istanbul ignore next */
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
@@ -58,132 +70,150 @@ function _objectDestructuringEmpty(obj) { if (obj == null) throw new TypeError("
 // User Management Middleware
 // -------------------------------------------
 function auth(_ref) {
-  var session = _ref.session;
+  var ripple = _ref.ripple;
   var match = _ref.match;
   var mask = _ref.mask;
   var quick = _ref.quick;
 
   log('creating');
 
-  // this function is used to restore a session from a reconnecting client
-  (0, _def2.default)(session.store.sessions, 'create', function create(sid) {
-    var socket = values(ripple.io.of('/').sockets).filter((0, _by2.default)('sessionID', sid)).pop();
-    session.store.sessions[sid] = (0, _str2.default)(session.store.createSession(socket, session));
-  });
-
   var loaded = {
     // whenever there is a change to a session, refresh their resources
 
     sessions: function sessions(ripple, _ref2) {
       var body = _ref2.body;
-      body.on('change.refresh', (0, _debounce2.default)(200)(refresh));
+
+      body.on('change.refresh', (0, _debounce2.default)(200)(function (_ref3) {
+        var key = _ref3.key;
+
+        ripple.stream(key.split('.').shift())();
+      }));
+
+      ripple.io.on('connection', function (socket) {
+        var sessionID = socket.sessionID;
+
+        body[sessionID] = body[sessionID] || {};
+        Object.defineProperty(socket, 'user', {
+          get: function get(d) {
+            return body[sessionID] && body[sessionID].user;
+          }
+        });
+
+        (0, _update2.default)(sessionID + '.' + socket.id, socket)(body);
+        socket.on('disconnect', function (d) {
+          remove(sessionID + '.' + socket.id)(body);
+          if (!keys(body[sessionID]).length) remove(sessionID)(body);
+        });
+      });
     }
+
     // load users and login on register
     ,
     users: function users(ripple) {
       ripple.connections.mysql.load('users').then(function (rows) {
-        return ripple('users', rows.reduce(to.obj, {})).on('change', newUser);
-      });
+        return ripple('users', rows.reduce(_to2.default.obj, {})).on('change', newUser);
+      }).catch(err);
     }
   };
 
-  return [{ name: 'sessions',
-    body: session.store.sessions,
-    headers: { loaded: loaded.sessions, from: _falsy2.default, to: _falsy2.default }
-  }, { name: 'users',
-    body: {},
-    headers: { loaded: loaded.users, from: register, to: function to(d) {
-        return {};
-      } }
-  }, { name: 'user',
-    body: {},
-    headers: {
-      from: login(match, quick),
-      to: limit(mask),
-      cache: 'no-store',
-      helpers: { whos: whos /*, register, logout*/ }
+  return {
+    sessions: {
+      name: 'sessions',
+      body: {},
+      headers: { from: _falsy2.default, to: _falsy2.default, loaded: loaded.sessions }
+    },
+    users: {
+      name: 'users',
+      body: {},
+      headers: { from: _falsy2.default, to: _falsy2.default, loaded: loaded.users }
+    },
+    user: {
+      name: 'user',
+      body: {},
+      headers: {
+        from: from(match, quick),
+        to: limit(mask),
+        cache: 'no-store',
+        helpers: { whos: whos, isValidPassword: isValidPassword }
+      }
     }
-  }];
+  };
 }
 
+var from = function from(match, quick) {
+  return function (_ref4, req, res) {
+    _objectDestructuringEmpty(_ref4);
+
+    req.socket = this;
+    var type = req.type;
+
+    return type == 'register' ? register(req, res) : type == 'forgot' ? forgot(req, res) : type == 'logout' ? logout(req, res) : type == 'reset' ? reset(req, res) : type == 'login' ? login(match, quick)(req, res) : (err('no verb', type), false);
+  };
+};
+
 var login = function login(match, quick) {
-  return function (_ref3, _ref4) {
-    var body = _ref3.body;
-    var value = _ref4.value;
+  return function (req, res) {
+    log('login user', (0, _str2.default)(email).grey);
 
-    var _ref5 = value || body || {};
+    var _req$value = req.value;
+    var value = _req$value === undefined ? {} : _req$value;
+    var type = req.type;
+    var key = req.key;
+    var socket = req.socket;
+    var email = value.email;
+    var password = value.password;
+    var end = setSession(socket.sessionID, email);
 
-    var attempt = _ref5.attempt;
-
-    if (!attempt) return err('no attempt?'), false;
-    log('login attempted', (0, _str2.default)(attempt.email).grey);
-    var end = resolve(this.sessionID, attempt || {});
-
-    if (!attempt.email || !attempt.password) return end('Missing username/password');
+    if (!email || !password) return end('Missing username/password');
 
     // find user record
-    var row = values(ripple('users')).filter((0, _by2.default)('email', attempt.email)).pop();
+    var row = values(ripple('users')).filter((0, _by2.default)('email', email)).pop();
 
     if (row && match && !match(row)) return end('Your account is not approved');
 
     // quick register if no matching email
-    if (!row && attempt.password) return quick ? !register(this, attempt) : end('Incorrect username/password');
+    if (!row && password) return quick ? register(req, res) : end('Incorrect username/password');
 
     // calc hash
     var saltHash = hash(row.salt),
-        apwdHash = hash(attempt.password),
+        apwdHash = hash(password),
         atmptHash = hash(saltHash + apwdHash);
 
     // incorrect password
     if (atmptHash !== row.hash) return end('Incorrect username/password');
 
     // correct password, set session data
-    return end({ id: row.id });
+    return end(row);
   };
 };
 
-var resolve = function resolve(sid) {
-  var _ref6 = arguments.length <= 1 || arguments[1] === undefined ? {} : arguments[1];
-
-  var _ref6$email = _ref6.email;
-  var email = _ref6$email === undefined ? '' : _ref6$email;
+var setSession = function setSession(sessionID) {
+  var email = arguments.length <= 1 || arguments[1] === undefined ? '' : arguments[1];
   return function (detail) {
-    if (_is2.default.str(detail)) detail = { invalid: true, msg: detail };
+    var sessions = ripple('sessions'),
+        user = _is2.default.str(detail) ? { invalid: true, msg: detail } : detail,
+        fn = user.invalid ? err : log;
 
-    set(sid, 'user', detail);(detail.invalid ? err : log)(detail.msg || 'logged in', email, sid.grey);
+    fn(user.msg || 'logged in'.green, email.bold, sessionID.grey);
+    (0, _update2.default)(sessionID + '.user', user)(sessions);
     return false;
   };
 };
 
-var set = function set(sid, name, details) {
-  var sessions = ripple('sessions');
-  if (!sessions[sid]) ripple('sessions').create(sid);
-  sessions[sid] = (0, _parse2.default)(sessions[sid]);
-  sessions[sid][name] = details;
-  (0, _update2.default)(sid, (0, _str2.default)(sessions[sid]))(sessions);
-  // ripple.emit('change', ['sessions', { key: sid }])
-  log('sessions updated', (0, _str2.default)(details).grey);
+var newUser = function newUser(_ref5) {
+  var value = _ref5.value;
+  var id = value.id;
+  var email = value.email;
+  var sessionID = value.sessionID;
+
+  if (!id || !sessionID) return;
+  setSession(sessionID, email)(ripple('users')[id]);
 };
 
-var newUser = function newUser(_ref7) {
-  var value = _ref7.value;
-
-  if (!value.id || !value.sessionID) return;
-  console.log("new user");
-  resolve(value.sessionID, value)({ id: value.id });
-};
-
-// const register = ({ sessionID = '' }, { email, password }, body) => {
-function register(_ref8, _ref9, respond) {
-  var key = _ref9.key;
-  var type = _ref9.type;
-  var value = _ref9.value;
-
-  _objectDestructuringEmpty(_ref8);
-
-  if (type !== 'register') return respond(err(400, 'can only register users')), false;
-
-  var sessionID = this.sessionID;
+var register = function register(_ref6, res) {
+  var value = _ref6.value;
+  var socket = _ref6.socket;
+  var sessionID = socket.sessionID;
   var email = value.email;
   var password = value.password;
   var users = ripple('users');
@@ -198,39 +228,104 @@ function register(_ref8, _ref9, respond) {
     hash: fullHash,
     sessionID: sessionID
   })(value);
+  var to = email;
+  var text = template('join', { email: email, password: password });
+  var subject = "Welcome " + req.body.firstname;
 
-  if (values(users).some((0, _by2.default)('email', email))) return console.log(!respond(err(409, 'user registered', email))), false;
+  if (values(users).some((0, _by2.default)('email', email))) return res(err(409, 'user registered', email)), false;
 
   log('registering', email, sessionID.grey);
 
   my.add('users', user).then(function (id) {
-    return respond(log(200, 'added user'.green, !!(0, _update2.default)(id, (user.id = id, user))(users)));
-  });
+    return mailer({ to: to, subject: subject, text: text }), id;
+  }).then(function (id) {
+    return res(log(200, 'added user'.green, !!(0, _update2.default)(id, (user.id = id, user))(users)));
+  }).catch(err);
 
   return false;
-}
-
-// const logout = (req, res) => {
-//   log('logout', ripple('sessions'))
-//   delete req.session.user
-//   ripple('sessions')[req.sessionID] = str(req.session)
-//   res.status(204).end()
-//   ripple.stream(req.sessionID)()
-// }
-
-// const refresh = ({ key }) => ripple.stream(key)()
-var refresh = function refresh(_ref10) {
-  var key = _ref10.key;
-
-  console.log("refresh", ripple('sessions'));
-  ripple.stream(key)();
 };
 
-var whos = function whos(socket) {
-  var sessionID = (0, _key2.default)('sessionID')(socket),
-      user = [ripple('sessions')[sessionID]].filter(Boolean).map(_parse2.default).map((0, _key2.default)('user')).pop() || {};
+var logout = function logout(_ref7, res) {
+  var socket = _ref7.socket;
+  var sessionID = socket.sessionID;
 
-  return ripple('users')[user.id] || user;
+  log('logout'.green, 'user'.bold, sessionID.grey);
+  remove(sessionID + '.user')(ripple('sessions'));
+  return false;
+};
+
+var forgot = function forgot(_ref8, res) {
+  var value = _ref8.value;
+  var email = value.email;
+  var forgot_code = randomise();
+  var forgot_time = new Date();
+  var users = ripple('users');
+
+  var _ripple = ripple('templates');
+
+  var template = _ripple.template;
+  var my = ripple.connections.mysql;
+  var me = values(users).filter((0, _by2.default)('email', email)).pop();
+  var subject = "Forgot Password";
+  var text = template('forgot', { forgot_code: forgot_code });
+  var to = me.email;
+  var id = me && me.id;
+
+  if (!me) return time(2000, function (d) {
+    return res(200, err('forgot invalid email', email));
+  }), false;
+
+  return my.update('users', { id: id, forgot_code: forgot_code, forgot_time: forgot_time }).then(function (id) {
+    (0, _update2.default)(id + '.forgot_code', forgot_code)(users);
+    (0, _update2.default)(id + '.forgot_time', new Date())(users);
+  }).then(function (d) {
+    return mailer({ to: to, subject: subject, text: text });
+  }).then(function (d) {
+    return res(log(200, 'forgot password'.green, email.green));
+  }).catch(err);
+};
+
+var reset = function reset(_ref9, res) {
+  var value = _ref9.value;
+  var code = value.code;
+  var password = value.password;
+
+  var _ripple2 = ripple('user');
+
+  var isValidPassword = _ripple2.isValidPassword;
+  var users = ripple('users');
+  var my = ripple.connections.mysql;
+  var me = values(users).filter((0, _by2.default)('forgot_code', code)).filter((0, _by2.default)('forgot_time', function (d) {
+    return (0, _moment2.default)().subtract(24, 'hours') < d < (0, _moment2.default)();
+  })).pop();
+
+  if (!me) return res(403, err('reset code invalid', code)), false;
+  if (!isValidPassword(password)) return res(403, err('reset password invalid', code)), false;
+
+  var id = me.id;
+  var salt = Math.random().toString(36).substr(2, 5);
+  var saltHash = hash(salt);
+  var apwdHash = hash(password);
+  var fullHash = hash(saltHash + apwdHash);
+  var forgot_code = '';
+  var forgot_time = '';
+
+  my.update('users', { id: id, forgot_code: forgot_code, forgot_time: forgot_time, salt: salt, hash: fullHash }).then(function (id) {
+    (0, _update2.default)(id + '.salt', salt)(users);
+    (0, _update2.default)(id + '.hash', fullHash)(users);
+    (0, _update2.default)(id + '.forgot_code', forgot_code)(users);
+    (0, _update2.default)(id + '.forgot_time', forgot_time)(users);
+    res(200, log('reset password'.green, (0, _str2.default)(id).grey));
+  }).catch(err);
+};
+
+var randomise = function randomise(d) {
+  return Math.random().toString(36).substr(2, 5) + Math.random().toString(36).substr(2, 5) + Math.random().toString(36).substr(2, 5);
+};
+
+var whos = function whos(_ref10) {
+  var sessionID = _ref10.sessionID;
+  return ripple('sessions')[sessionID] && ripple('sessions')[sessionID].user || {};
 };
 
 var limit = function limit(fields) {
@@ -238,6 +333,10 @@ var limit = function limit(fields) {
     var user = whos(this),
         val = (0, _key2.default)(fields)(user);
 
+    // console.log("id", id)
+    // console.log("user", user)
+    // console.log("val", val)
+    // console.log("limit", user)
     if (user.invalid) val.invalid = user.invalid;
     if (user.msg) val.msg = user.msg;
     return val;
@@ -246,6 +345,11 @@ var limit = function limit(fields) {
 
 var hash = function hash(thing) {
   return _crypto2.default.createHash('md5').update(thing).digest('hex');
+};
+
+var isValidPassword = function isValidPassword(d) {
+  return (/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/.test(d)
+  );
 };
 
 var log = require('utilise/log')('[auth]'),
