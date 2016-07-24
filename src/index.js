@@ -126,6 +126,7 @@ const register = ({ value, socket }, res) => {
   const { sessionID } = socket
       , { email, password } = value
       , users = ripple('users')
+      , { template } = ripple('templates')
       , my = ripple.connections.mysql
       , salt = Math.random().toString(36).substr(2, 5)
       , saltHash = hash(salt)
