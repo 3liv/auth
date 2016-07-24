@@ -64,8 +64,6 @@ var _moment2 = _interopRequireDefault(_moment);
 /* istanbul ignore next */
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-function _objectDestructuringEmpty(obj) { if (obj == null) throw new TypeError("Cannot destructure undefined"); }
-
 // -------------------------------------------
 // User Management Middleware
 // -------------------------------------------
@@ -78,15 +76,14 @@ function auth(_ref) {
   log('creating');
 
   var loaded = {
-    // whenever there is a change to a session, refresh their resources
-
     sessions: function sessions(ripple, _ref2) {
       var body = _ref2.body;
 
+      // whenever there is a change to a session, refresh their resources
       body.on('change.refresh', (0, _debounce2.default)(200)(function (_ref3) {
         var key = _ref3.key;
 
-        ripple.stream(key.split('.').shift())();
+        ripple.send(key.split('.').shift())();
       }));
 
       ripple.io.on('connection', function (socket) {
@@ -141,13 +138,8 @@ function auth(_ref) {
 }
 
 var from = function from(match, quick) {
-  return function (_ref4, req, res) {
-    _objectDestructuringEmpty(_ref4);
-
-    req.socket = this;
-    var type = req.type;
-
-    return type == 'register' ? register(req, res) : type == 'forgot' ? forgot(req, res) : type == 'logout' ? logout(req, res) : type == 'reset' ? reset(req, res) : type == 'login' ? login(match, quick)(req, res) : (err('no verb', type), false);
+  return function (req, res) {
+    return req.type == 'register' ? register(req, res) : req.type == 'forgot' ? forgot(req, res) : req.type == 'logout' ? logout(req, res) : req.type == 'reset' ? reset(req, res) : req.type == 'login' ? login(match, quick)(req, res) : (err('no verb', req.type), false);
   };
 };
 
@@ -200,8 +192,8 @@ var setSession = function setSession(sessionID) {
   };
 };
 
-var newUser = function newUser(_ref5) {
-  var value = _ref5.value;
+var newUser = function newUser(_ref4) {
+  var value = _ref4.value;
   var id = value.id;
   var email = value.email;
   var sessionID = value.sessionID;
@@ -210,13 +202,17 @@ var newUser = function newUser(_ref5) {
   setSession(sessionID, email)(ripple('users')[id]);
 };
 
-var register = function register(_ref6, res) {
-  var value = _ref6.value;
-  var socket = _ref6.socket;
+var register = function register(_ref5, res) {
+  var value = _ref5.value;
+  var socket = _ref5.socket;
   var sessionID = socket.sessionID;
   var email = value.email;
   var password = value.password;
   var users = ripple('users');
+
+  var _ripple = ripple('templates');
+
+  var template = _ripple.template;
   var my = ripple.connections.mysql;
   var salt = Math.random().toString(36).substr(2, 5);
   var saltHash = hash(salt);
@@ -245,8 +241,8 @@ var register = function register(_ref6, res) {
   return false;
 };
 
-var logout = function logout(_ref7, res) {
-  var socket = _ref7.socket;
+var logout = function logout(_ref6, res) {
+  var socket = _ref6.socket;
   var sessionID = socket.sessionID;
 
   log('logout'.green, 'user'.bold, sessionID.grey);
@@ -254,16 +250,16 @@ var logout = function logout(_ref7, res) {
   return false;
 };
 
-var forgot = function forgot(_ref8, res) {
-  var value = _ref8.value;
+var forgot = function forgot(_ref7, res) {
+  var value = _ref7.value;
   var email = value.email;
   var forgot_code = randomise();
   var forgot_time = new Date();
   var users = ripple('users');
 
-  var _ripple = ripple('templates');
+  var _ripple2 = ripple('templates');
 
-  var template = _ripple.template;
+  var template = _ripple2.template;
   var my = ripple.connections.mysql;
   var me = values(users).filter((0, _by2.default)('email', email)).pop();
   var subject = "Forgot Password";
@@ -285,14 +281,14 @@ var forgot = function forgot(_ref8, res) {
   }).catch(err);
 };
 
-var reset = function reset(_ref9, res) {
-  var value = _ref9.value;
+var reset = function reset(_ref8, res) {
+  var value = _ref8.value;
   var code = value.code;
   var password = value.password;
 
-  var _ripple2 = ripple('user');
+  var _ripple3 = ripple('user');
 
-  var isValidPassword = _ripple2.isValidPassword;
+  var isValidPassword = _ripple3.isValidPassword;
   var users = ripple('users');
   var my = ripple.connections.mysql;
   var me = values(users).filter((0, _by2.default)('forgot_code', code)).filter((0, _by2.default)('forgot_time', function (d) {
@@ -323,23 +319,19 @@ var randomise = function randomise(d) {
   return Math.random().toString(36).substr(2, 5) + Math.random().toString(36).substr(2, 5) + Math.random().toString(36).substr(2, 5);
 };
 
-var whos = function whos(_ref10) {
-  var sessionID = _ref10.sessionID;
+var whos = function whos(_ref9) {
+  var sessionID = _ref9.sessionID;
   return ripple('sessions')[sessionID] && ripple('sessions')[sessionID].user || {};
 };
 
 var limit = function limit(fields) {
-  return function () {
-    var user = whos(this),
-        val = (0, _key2.default)(fields)(user);
+  return function (req) {
+    var user = whos(req.socket);
+    req.value = (0, _key2.default)(fields)(user);
 
-    // console.log("id", id)
-    // console.log("user", user)
-    // console.log("val", val)
-    // console.log("limit", user)
-    if (user.invalid) val.invalid = user.invalid;
-    if (user.msg) val.msg = user.msg;
-    return val;
+    if (user.invalid) req.value.invalid = user.invalid;
+    if (user.msg) req.value.msg = user.msg;
+    return req;
   };
 };
 
