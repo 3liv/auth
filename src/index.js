@@ -5,36 +5,36 @@ export default function auth({ ripple, match, mask, quick }){
   log('creating')
 
   const loaded = {
-          // whenever there is a change to a session, refresh their resources
-          sessions(ripple, { body }) { 
-            body.on('change.refresh', debounce(200)(({ key }) => {
-              ripple.stream(key.split('.').shift())()
-            }))
+    sessions(ripple, { body }) { 
+      // whenever there is a change to a session, refresh their resources
+      body.on('change.refresh', debounce(200)(({ key }) => {
+        ripple.send(key.split('.').shift())()
+      }))
 
-            ripple.io.on('connection', socket => {
-              const { sessionID } = socket
-              body[sessionID] = body[sessionID] || {}
-              Object.defineProperty(socket, 'user', { 
-                get: d => body[sessionID] && body[sessionID].user
-              })
+      ripple.io.on('connection', socket => {
+        const { sessionID } = socket
+        body[sessionID] = body[sessionID] || {}
+        Object.defineProperty(socket, 'user', { 
+          get: d => body[sessionID] && body[sessionID].user
+        })
 
-              update(`${sessionID}.${socket.id}`, socket)(body)
-              socket.on('disconnect', d => {
-                remove(`${sessionID}.${socket.id}`)(body)
-                if (!keys(body[sessionID]).length)
-                  remove(sessionID)(body)
-              })
-            })
-          }
-          
-          // load users and login on register
-        , users(ripple) { ripple.connections.mysql.load('users')
-            .then(rows => 
-              ripple('users', rows.reduce(to.obj, {}))
-                .on('change', newUser))
-            .catch(err)
-          }
-        }
+        update(`${sessionID}.${socket.id}`, socket)(body)
+        socket.on('disconnect', d => {
+          remove(`${sessionID}.${socket.id}`)(body)
+          if (!keys(body[sessionID]).length)
+            remove(sessionID)(body)
+        })
+      })
+    }
+    
+    // load users and login on register
+  , users(ripple) { ripple.connections.mysql.load('users')
+      .then(rows => 
+        ripple('users', rows.reduce(to.obj, {}))
+          .on('change', newUser))
+      .catch(err)
+    }
+  }
 
   return {
     sessions: { 
