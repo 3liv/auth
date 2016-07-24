@@ -60,16 +60,13 @@ export default function auth({ ripple, match, mask, quick }){
   }
 }
 
-const from = (match, quick) => function({}, req, res) {
-  req.socket = this
-  const { type } = req
-  return type == 'register' ? register(req, res)
-       : type == 'forgot'   ? forgot(req, res)
-       : type == 'logout'   ? logout(req, res)
-       : type == 'reset'    ? reset(req, res)
-       : type == 'login'    ? login(match, quick)(req, res)
-       : (err('no verb', type), false)
-}
+const from = (match, quick) => (req, res) => 
+  req.type == 'register' ? register(req, res)
+: req.type == 'forgot'   ? forgot(req, res)
+: req.type == 'logout'   ? logout(req, res)
+: req.type == 'reset'    ? reset(req, res)
+: req.type == 'login'    ? login(match, quick)(req, res)
+: (err('no verb', req.type), false)
 
 const login = (match, quick) => (req, res) => { 
   log('login user', str(email).grey)
@@ -228,13 +225,13 @@ const randomise = d =>
 
 const whos = ({ sessionID }) => ripple('sessions')[sessionID] && ripple('sessions')[sessionID].user || {}
 
-const limit = fields => function(){
-  const user = whos(this)
-      , val  = key(fields)(user)
+const limit = fields => req => {
+  const user = whos(req.socket)
+  req.value = key(fields)(user)
 
-  if (user.invalid) val.invalid = user.invalid
-  if (user.msg) val.msg = user.msg
-  return val
+  if (user.invalid) req.value.invalid = user.invalid
+  if (user.msg) req.value.msg = user.msg
+  return req
 }
 
 const hash = thing => crypto
