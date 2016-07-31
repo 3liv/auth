@@ -110,7 +110,6 @@ const setSession = (sessionID, email = '') => detail => {
 
   fn(user.msg || 'logged in'.green, email.bold, sessionID.grey)
   update(`${sessionID}.user`, user)(sessions)
-  return false
 }
 
 const newUser = ({ value }) => {
@@ -137,7 +136,7 @@ const register = ({ value, socket }, res) => {
         })(value)
       , to = email
       , text = template('join', { email, password })
-      , subject = "Welcome " + req.body.firstname
+      , subject = "Welcome " + value.firstname
 
   if (values(users).some(by('email', email))) 
     return res(err(409, 'user registered', email)), false
@@ -148,15 +147,12 @@ const register = ({ value, socket }, res) => {
     .then(id => (mailer({ to, subject, text }), id))
     .then(id => res(log(200, 'added user'.green, !!update(id, (user.id = id, user))(users))))
     .catch(err)
-
-  return false
 }
 
 const logout = ({ socket }, res) => {
   const { sessionID } = socket
   log('logout'.green, 'user'.bold, sessionID.grey)
   remove(`${sessionID}.user`)(ripple('sessions'))
-  return false
 }
 
 const forgot = ({ value }, res) => {
@@ -171,12 +167,12 @@ const forgot = ({ value }, res) => {
           .pop()
       , subject = "Forgot Password"
       , text = template('forgot', { forgot_code })
-      , to = me.email
+      , to = me && me.email
       , id = me && me.id
 
   if (!me) return time(2000, d => res(200, err('forgot invalid email', email))), false
 
-  return my.update('users', { id, forgot_code, forgot_time })
+  my.update('users', { id, forgot_code, forgot_time })
     .then(id => {
       update(`${id}.forgot_code`, forgot_code)(users)
       update(`${id}.forgot_time`, new Date())(users)

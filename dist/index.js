@@ -188,7 +188,6 @@ var setSession = function setSession(sessionID) {
 
     fn(user.msg || 'logged in'.green, email.bold, sessionID.grey);
     (0, _update2.default)(sessionID + '.user', user)(sessions);
-    return false;
   };
 };
 
@@ -226,7 +225,7 @@ var register = function register(_ref5, res) {
   })(value);
   var to = email;
   var text = template('join', { email: email, password: password });
-  var subject = "Welcome " + req.body.firstname;
+  var subject = "Welcome " + value.firstname;
 
   if (values(users).some((0, _by2.default)('email', email))) return res(err(409, 'user registered', email)), false;
 
@@ -237,8 +236,6 @@ var register = function register(_ref5, res) {
   }).then(function (id) {
     return res(log(200, 'added user'.green, !!(0, _update2.default)(id, (user.id = id, user))(users)));
   }).catch(err);
-
-  return false;
 };
 
 var logout = function logout(_ref6, res) {
@@ -247,7 +244,6 @@ var logout = function logout(_ref6, res) {
 
   log('logout'.green, 'user'.bold, sessionID.grey);
   remove(sessionID + '.user')(ripple('sessions'));
-  return false;
 };
 
 var forgot = function forgot(_ref7, res) {
@@ -264,14 +260,14 @@ var forgot = function forgot(_ref7, res) {
   var me = values(users).filter((0, _by2.default)('email', email)).pop();
   var subject = "Forgot Password";
   var text = template('forgot', { forgot_code: forgot_code });
-  var to = me.email;
+  var to = me && me.email;
   var id = me && me.id;
 
   if (!me) return time(2000, function (d) {
     return res(200, err('forgot invalid email', email));
   }), false;
 
-  return my.update('users', { id: id, forgot_code: forgot_code, forgot_time: forgot_time }).then(function (id) {
+  my.update('users', { id: id, forgot_code: forgot_code, forgot_time: forgot_time }).then(function (id) {
     (0, _update2.default)(id + '.forgot_code', forgot_code)(users);
     (0, _update2.default)(id + '.forgot_time', new Date())(users);
   }).then(function (d) {
