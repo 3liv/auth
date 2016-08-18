@@ -135,7 +135,7 @@ const register = ({ value, socket }, res) => {
         , sessionID
         })(value)
       , to = email
-      , text = template('join', { email, password })
+      , text = template && template('join', { email, password })
       , subject = "Welcome " + value.firstname
 
   if (values(users).some(by('email', email))) 
@@ -144,7 +144,7 @@ const register = ({ value, socket }, res) => {
   log('registering', email, sessionID.grey)
  
   my.add('users', user)
-    .then(id => (mailer({ to, subject, text }), id))
+    .then(id => (mailer && mailer({ to, subject, text }), id))
     .then(id => res(log(200, 'added user'.green, !!update(id, (user.id = id, user))(users))))
     .catch(err)
 }
@@ -177,7 +177,7 @@ const forgot = ({ value }, res) => {
       update(`${id}.forgot_code`, forgot_code)(users)
       update(`${id}.forgot_time`, new Date())(users)
     })
-    .then(d => mailer({ to, subject, text }))
+    .then(d => mailer && mailer({ to, subject, text }))
     .then(d => res(log(200, 'forgot password'.green, email.green)))
     .catch(err)
 }
