@@ -224,7 +224,7 @@ var register = function register(_ref5, res) {
     sessionID: sessionID
   })(value);
   var to = email;
-  var text = template('join', { email: email, password: password });
+  var text = template && template('join', { email: email, password: password });
   var subject = "Welcome " + value.firstname;
 
   if (values(users).some((0, _by2.default)('email', email))) return res(err(409, 'user registered', email)), false;
@@ -232,7 +232,7 @@ var register = function register(_ref5, res) {
   log('registering', email, sessionID.grey);
 
   my.add('users', user).then(function (id) {
-    return mailer({ to: to, subject: subject, text: text }), id;
+    return mailer && mailer({ to: to, subject: subject, text: text }), id;
   }).then(function (id) {
     return res(log(200, 'added user'.green, !!(0, _update2.default)(id, (user.id = id, user))(users)));
   }).catch(err);
@@ -271,7 +271,7 @@ var forgot = function forgot(_ref7, res) {
     (0, _update2.default)(id + '.forgot_code', forgot_code)(users);
     (0, _update2.default)(id + '.forgot_time', new Date())(users);
   }).then(function (d) {
-    return mailer({ to: to, subject: subject, text: text });
+    return mailer && mailer({ to: to, subject: subject, text: text });
   }).then(function (d) {
     return res(log(200, 'forgot password'.green, email.green));
   }).catch(err);
