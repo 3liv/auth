@@ -117,9 +117,9 @@ const newUser = ({ value }) => {
   setSession(sessionID, email)(ripple('users')[id])
 }
 
-const register = ({ value, socket }, res) => {
-  const { sessionID } = socket
-      , { email, password } = value
+const register = ({ value, socket = {} }, res) => {
+  const { sessionID = '' } = socket
+      , { email, password = randompass() } = value
       , users = ripple('users')
       , { template } = ripple('templates')
       , my = ripple.connections.mysql
@@ -235,6 +235,8 @@ const hash = thing => crypto
   .digest('hex')
 
 const isValidPassword = d => /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/.test(d)
+
+const randompass = d => Math.random().toString(36).slice(-8)
 
 import debounce from 'utilise/debounce'
 import update from 'utilise/update'
