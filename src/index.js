@@ -137,13 +137,15 @@ const register = ({ value, socket = {} }, res) => {
       , subject = "Welcome " + value.firstname
 
   if (values(users).some(by('email', email))) 
-    return res(err(409, 'user registered', email)), false
+    return res(400, err('There is already a user registered with that email', email)), false
 
   log('registering', email, sessionID.grey)
- 
+
   my.add('users', user)
     .then(id => (mailer && mailer({ to, subject, text }), id))
-    .then(id => res(log(200, 'added user'.green, !!update(id, (user.id = id, user))(users))))
+    .then(id => (update(id, (user.id = id, user))(users), id))
+    .then(id => log('added user'.green, id))
+    .then(id => res(200, 'User added'))
     .catch(err)
 }
 
