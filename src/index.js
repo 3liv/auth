@@ -15,7 +15,7 @@ export default function auth({ ripple, match, mask, quick }){
         const { sessionID } = socket
         body[sessionID] = body[sessionID] || {}
         Object.defineProperty(socket, 'user', { 
-          get: d => body[sessionID] && body[sessionID].user
+          get: d => body[sessionID] && body[sessionID].user || {}
         })
 
         update(`${sessionID}.${socket.id}`, socket)(body)
