@@ -122,7 +122,6 @@ const register = ({ value, socket = {} }, res) => {
       , { email, password = randompass() } = value
       , users = ripple('users')
       , { template } = ripple('templates')
-      , my = ripple.connections.mysql
       , salt = Math.random().toString(36).substr(2, 5)
       , saltHash = hash(salt)
       , apwdHash = hash(password)
@@ -160,7 +159,6 @@ const forgot = ({ value }, res) => {
       , forgot_time = new Date()
       , users = ripple('users')
       , { template } = ripple('templates')
-      , my = ripple.connections.mysql
       , me = values(users)
           .filter(by('email', email))
           .pop()
@@ -185,7 +183,6 @@ const reset = ({ value }, res) => {
   const { code, password } = value
       , { isValidPassword } = ripple('user')
       , users = ripple('users')
-      , my = ripple.connections.mysql
       , me = values(users)
           .filter(by('forgot_code', code))
           .filter(by('forgot_time', d => moment().subtract(24, 'hours') < d < moment()))
