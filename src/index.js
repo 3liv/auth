@@ -82,9 +82,6 @@ const login = (match, quick) => (req, res) => {
     .filter(by('email', email))
     .pop()
 
-  if (row && match && !match(row)) 
-    return end('Your account is not approved')
-
   // quick register if no matching email
   if (!row && password) 
     return quick ? register(req, res) : end('Incorrect username/password')
@@ -97,6 +94,9 @@ const login = (match, quick) => (req, res) => {
   // incorrect password
   if (atmptHash !== row.hash) 
     return end('Incorrect username/password')
+
+  if (row && match && (match = match(row))) 
+    return end(match)
 
   // correct password, set session data
   return end(row)
