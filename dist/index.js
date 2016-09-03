@@ -92,7 +92,7 @@ function auth(_ref) {
         body[sessionID] = body[sessionID] || {};
         Object.defineProperty(socket, 'user', {
           get: function get(d) {
-            return body[sessionID] && body[sessionID].user;
+            return body[sessionID] && body[sessionID].user || {};
           }
         });
 
@@ -107,9 +107,11 @@ function auth(_ref) {
     // load users and login on register
     ,
     users: function users(ripple) {
-      ripple.connections.mysql.load('users').then(function (rows) {
-        return ripple('users', rows.reduce(_to2.default.obj, {})).on('change', newUser);
-      }).catch(err);
+      my.load('users').then(function (rows) {
+        return ripple('users', rows.reduce(_to2.default.obj, {}));
+      })
+      // .on('change', newUser))
+      .catch(err);
     }
   };
 
@@ -161,8 +163,6 @@ var login = function login(match, quick) {
     // find user record
     var row = values(ripple('users')).filter((0, _by2.default)('email', email)).pop();
 
-    if (row && match && !match(row)) return end('Your account is not approved');
-
     // quick register if no matching email
     if (!row && password) return quick ? register(req, res) : end('Incorrect username/password');
 
@@ -173,6 +173,8 @@ var login = function login(match, quick) {
 
     // incorrect password
     if (atmptHash !== row.hash) return end('Incorrect username/password');
+
+    if (row && match && (match = match(row))) return end(match);
 
     // correct password, set session data
     return end(row);
@@ -203,16 +205,18 @@ var newUser = function newUser(_ref4) {
 
 var register = function register(_ref5, res) {
   var value = _ref5.value;
-  var socket = _ref5.socket;
-  var sessionID = socket.sessionID;
+  var _ref5$socket = _ref5.socket;
+  var socket = _ref5$socket === undefined ? {} : _ref5$socket;
+  var _socket$sessionID = socket.sessionID;
+  var sessionID = _socket$sessionID === undefined ? '' : _socket$sessionID;
   var email = value.email;
-  var password = value.password;
+  var _value$password = value.password;
+  var password = _value$password === undefined ? randompass() : _value$password;
   var users = ripple('users');
 
   var _ripple = ripple('templates');
 
   var template = _ripple.template;
-  var my = ripple.connections.mysql;
   var salt = Math.random().toString(36).substr(2, 5);
   var saltHash = hash(salt);
   var apwdHash = hash(password);
@@ -227,14 +231,18 @@ var register = function register(_ref5, res) {
   var text = template && template('join', { email: email, password: password });
   var subject = "Welcome " + value.firstname;
 
-  if (values(users).some((0, _by2.default)('email', email))) return res(err(409, 'user registered', email)), false;
+  if (values(users).some((0, _by2.default)('email', email))) return res(400, err('There is already a user registered with that email', email)), false;
 
   log('registering', email, sessionID.grey);
 
   my.add('users', user).then(function (id) {
     return mailer && mailer({ to: to, subject: subject, text: text }), id;
   }).then(function (id) {
-    return res(log(200, 'added user'.green, !!(0, _update2.default)(id, (user.id = id, user))(users)));
+    return (0, _update2.default)(id, (user.id = id, user))(users), id;
+  }).then(function (id) {
+    return log('added user'.green, id);
+  }).then(function (id) {
+    return res(200, 'User added');
   }).catch(err);
 };
 
@@ -256,7 +264,6 @@ var forgot = function forgot(_ref7, res) {
   var _ripple2 = ripple('templates');
 
   var template = _ripple2.template;
-  var my = ripple.connections.mysql;
   var me = values(users).filter((0, _by2.default)('email', email)).pop();
   var subject = "Forgot Password";
   var text = template('forgot', { forgot_code: forgot_code });
@@ -286,7 +293,6 @@ var reset = function reset(_ref8, res) {
 
   var isValidPassword = _ripple3.isValidPassword;
   var users = ripple('users');
-  var my = ripple.connections.mysql;
   var me = values(users).filter((0, _by2.default)('forgot_code', code)).filter((0, _by2.default)('forgot_time', function (d) {
     return (0, _moment2.default)().subtract(24, 'hours') < d < (0, _moment2.default)();
   })).pop();
@@ -338,6 +344,10 @@ var hash = function hash(thing) {
 var isValidPassword = function isValidPassword(d) {
   return (/^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/.test(d)
   );
+};
+
+var randompass = function randompass(d) {
+  return Math.random().toString(36).slice(-8);
 };
 
 var log = require('utilise/log')('[auth]'),
