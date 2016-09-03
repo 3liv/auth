@@ -28,10 +28,9 @@ export default function auth({ ripple, match, mask, quick }){
     }
     
     // load users and login on register
-  , users(ripple) { ripple.connections.mysql.load('users')
-      .then(rows => 
-        ripple('users', rows.reduce(to.obj, {}))
-          .on('change', newUser))
+  , users(ripple) { my.load('users')
+      .then(rows => ripple('users', rows.reduce(to.obj, {})))
+          // .on('change', newUser))
       .catch(err)
     }
   }
