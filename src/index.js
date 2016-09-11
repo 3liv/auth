@@ -8,6 +8,7 @@ export default function auth({ ripple, match, mask, quick, loaded }){
     sessions(ripple, { body }) { 
       // whenever there is a change to a session, refresh their resources
       body.on('change.refresh', debounce(200)(({ key }) => {
+        if (!key) return err('no key')
         ripple.send(key.split('.').shift())()
       }))
 
