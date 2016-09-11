@@ -72,10 +72,11 @@ function auth(_ref) {
   var match = _ref.match;
   var mask = _ref.mask;
   var quick = _ref.quick;
+  var loaded = _ref.loaded;
 
   log('creating');
 
-  var loaded = {
+  var after = {
     sessions: function sessions(ripple, _ref2) {
       var body = _ref2.body;
 
@@ -83,6 +84,7 @@ function auth(_ref) {
       body.on('change.refresh', (0, _debounce2.default)(200)(function (_ref3) {
         var key = _ref3.key;
 
+        if (!key) return err('no key');
         ripple.send(key.split('.').shift())();
       }));
 
@@ -109,9 +111,7 @@ function auth(_ref) {
     users: function users(ripple) {
       my.load('users').then(function (rows) {
         return ripple('users', rows.reduce(_to2.default.obj, {}));
-      })
-      // .on('change', newUser))
-      .catch(err);
+      }).then(loaded).catch(err);
     }
   };
 
@@ -119,12 +119,12 @@ function auth(_ref) {
     sessions: {
       name: 'sessions',
       body: {},
-      headers: { from: _falsy2.default, to: _falsy2.default, loaded: loaded.sessions }
+      headers: { from: _falsy2.default, to: _falsy2.default, loaded: after.sessions }
     },
     users: {
       name: 'users',
       body: {},
-      headers: { from: _falsy2.default, to: _falsy2.default, loaded: loaded.users }
+      headers: { from: _falsy2.default, to: _falsy2.default, loaded: after.users }
     },
     user: {
       name: 'user',
@@ -236,9 +236,12 @@ var register = function register(_ref5, res) {
   log('registering', email, sessionID.grey);
 
   my.add('users', user).then(function (id) {
-    return mailer && mailer({ to: to, subject: subject, text: text }), id;
-  }).then(function (id) {
-    return (0, _update2.default)(id, (user.id = id, user))(users), id;
+    return mailer && mailer({ to: to, subject: subject, text: text }), user.id = id;
+  })
+  // .then(id => (update(id, (user.id = id, user))(users), id))
+  // TODO: make utilise helper function for this
+  .then(function (id) {
+    return set({ key: id, type: 'add', value: user })(users), id;
   }).then(function (id) {
     return log('added user'.green, id);
   }).then(function (id) {
