@@ -143,8 +143,10 @@ const register = ({ value, socket = {} }, res) => {
   log('registering', email, sessionID.grey)
 
   my.add('users', user)
-    .then(id => (mailer && mailer({ to, subject, text }), id))
-    .then(id => (update(id, (user.id = id, user))(users), id))
+    .then(id => (mailer && mailer({ to, subject, text }), user.id = id))
+    // .then(id => (update(id, (user.id = id, user))(users), id))
+    // TODO: make utilise helper function for this
+    .then(id => (set({ key: id, type: 'add', value: user })(users), id))
     .then(id => log('added user'.green, id))
     .then(id => res(200, 'User added'))
     .catch(err)
