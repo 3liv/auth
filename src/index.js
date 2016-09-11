@@ -1,10 +1,10 @@
 // -------------------------------------------
 // User Management Middleware
 // -------------------------------------------
-export default function auth({ ripple, match, mask, quick }){
+export default function auth({ ripple, match, mask, quick, loaded }){
   log('creating')
 
-  const loaded = {
+  const after = {
     sessions(ripple, { body }) { 
       // whenever there is a change to a session, refresh their resources
       body.on('change.refresh', debounce(200)(({ key }) => {
@@ -30,7 +30,7 @@ export default function auth({ ripple, match, mask, quick }){
     // load users and login on register
   , users(ripple) { my.load('users')
       .then(rows => ripple('users', rows.reduce(to.obj, {})))
-          // .on('change', newUser))
+      .then(loaded)
       .catch(err)
     }
   }
@@ -39,12 +39,12 @@ export default function auth({ ripple, match, mask, quick }){
     sessions: { 
       name: 'sessions'
     , body: {}
-    , headers: { from: falsy, to: falsy, loaded: loaded.sessions }
+    , headers: { from: falsy, to: falsy, loaded: after.sessions }
     }
   , users: { 
       name: 'users'
     , body: {}
-    , headers: { from: falsy, to: falsy, loaded: loaded.users }
+    , headers: { from: falsy, to: falsy, loaded: after.users }
     }
   , user: { 
       name: 'user'
