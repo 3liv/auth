@@ -1,63 +1,67 @@
 // -------------------------------------------
 // User Management Middleware
 // -------------------------------------------
-export default function auth({ ripple, match, mask, quick, loaded }){
-  log('creating')
+export default function auth({ type, table }){
+    return function({ ripple, match, mask, quick, loaded }){
+      log('creating')
 
-  const after = {
-    sessions(ripple, { body }) { 
-      // whenever there is a change to a session, refresh their resources
-      body.on('change.refresh', debounce(200)(({ key }) => {
-        if (!key) return err('no key')
-        ripple.send(key.split('.').shift())()
-      }))
+      const db = (t) => ripple.connections[t]
+       , after = {
+        sessions(ripple, { body }) { 
+          // whenever there is a change to a session, refresh their resources
+          body.on('change.refresh', debounce(200)(({ key }) => {
+            if (!key) return err('no key')
+            ripple.send(key.split('.').shift())()
+          }))
 
-      ripple.io.on('connection', socket => {
-        const { sessionID } = socket
-        body[sessionID] = body[sessionID] || {}
-        Object.defineProperty(socket, 'user', { 
-          get: d => body[sessionID] && body[sessionID].user || {}
-        })
+          ripple.io.on('connection', socket => {
+            const { sessionID } = socket
+            body[sessionID] = body[sessionID] || {}
+            Object.defineProperty(socket, 'user', { 
+              get: d => body[sessionID] && body[sessionID].user || {}
+            })
 
-        update(`${sessionID}.${socket.id}`, socket)(body)
-        socket.on('disconnect', d => {
-          remove(`${sessionID}.${socket.id}`)(body)
-          if (!keys(body[sessionID]).length)
-            remove(sessionID)(body)
-        })
-      })
-    }
-    
-    // load users and login on register
-  , users(ripple) { my.load('users')
-      .then(rows => ripple('users', rows.reduce(to.obj, {})))
-      .then(loaded)
-      .catch(err)
-    }
-  }
+            update(`${sessionID}.${socket.id}`, socket)(body)
+            socket.on('disconnect', d => {
+              remove(`${sessionID}.${socket.id}`)(body)
+              if (!keys(body[sessionID]).length)
+                remove(sessionID)(body)
+            })
+          })
+        }
+        
+        // load users and login on register
+      , users(ripple) { 
+          db(type).load(table)
+          .then(rows => ripple('users', rows.reduce(to.obj, {})))
+          .then(loaded)
+          .catch(err)
+        }
+      }
 
-  return {
-    sessions: { 
-      name: 'sessions'
-    , body: {}
-    , headers: { from: falsy, to: falsy, loaded: after.sessions }
+      return {
+        sessions: { 
+          name: 'sessions'
+        , body: {}
+        , headers: { from: falsy, to: falsy, loaded: after.sessions }
+        }
+      , users: { 
+          name: 'users'
+        , body: {}
+        , headers: { from: falsy, to: falsy, loaded: after.users }
+        }
+      , user: { 
+          name: 'user'
+        , body: {}
+        , headers: { 
+            from: from(match, quick)
+          , to: limit(mask)
+          , cache: 'no-store' 
+          , helpers: { whos, isValidPassword }
+          } 
+        }
+      }
     }
-  , users: { 
-      name: 'users'
-    , body: {}
-    , headers: { from: falsy, to: falsy, loaded: after.users }
-    }
-  , user: { 
-      name: 'user'
-    , body: {}
-    , headers: { 
-        from: from(match, quick)
-      , to: limit(mask)
-      , cache: 'no-store' 
-      , helpers: { whos, isValidPassword }
-      } 
-    }
-  }
 }
 
 const from = (match, quick) => (req, res) => 
@@ -142,7 +146,7 @@ const register = ({ value, socket = {} }, res) => {
 
   log('registering', email, sessionID.grey)
 
-  my.add('users', user)
+  db(type).add('users', user)
     .then(id => (mailer && mailer({ to, subject, text }), user.id = id))
     // .then(id => (update(id, (user.id = id, user))(users), id))
     // TODO: make utilise helper function for this
@@ -174,7 +178,7 @@ const forgot = ({ value }, res) => {
 
   if (!me) return time(2000, d => res(200, err('forgot invalid email', email))), false
 
-  my.update('users', { id, forgot_code, forgot_time })
+  db(type).update(table, { id, forgot_code, forgot_time })
     .then(id => {
       update(`${id}.forgot_code`, forgot_code)(users)
       update(`${id}.forgot_time`, new Date())(users)
@@ -204,7 +208,7 @@ const reset = ({ value }, res) => {
       , forgot_code = ''
       , forgot_time = ''
 
-  my.update('users', { id, forgot_code, forgot_time, salt, hash: fullHash })
+  db(type).update(table, { id, forgot_code, forgot_time, salt, hash: fullHash })
     .then(id => {
       update(`${id}.salt`, salt)(users)
       update(`${id}.hash`, fullHash)(users)
@@ -241,11 +245,14 @@ const isValidPassword = d => /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$/.test(d)
 const randompass = d => Math.random().toString(36).slice(-8)
 
 import debounce from 'utilise/debounce'
+import remove from 'utilise/remove'
 import update from 'utilise/update'
 import client from 'utilise/client'
+import values from 'utilise/values'
 import falsy from 'utilise/falsy'
 import parse from 'utilise/parse'
 import noop from 'utilise/noop'
+import keys from 'utilise/keys'
 import key from 'utilise/key'
 import def from 'utilise/def'
 import str from 'utilise/str'
